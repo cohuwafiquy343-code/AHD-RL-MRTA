@@ -370,7 +370,7 @@ def update_pheromone_sas(tau, iter_sched, iter_mk, global_sched, global_mk, rho)
 # 单实例求解入口
 
 
-def solve(inst, max_evals=1000, ns=NS, alpha=ALPHA, beta=BETA,
+def solve(inst, max_evals=10000, ns=NS, alpha=ALPHA, beta=BETA,
           rho=RHO, p0=P0):
     """在评估预算内搜索，返回最优完工时间和智能体序列。"""
     mk, sched = greedy_construct(inst)

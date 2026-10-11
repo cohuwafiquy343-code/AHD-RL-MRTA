@@ -28,7 +28,7 @@ Run a method on one generated instance:
 python -m ahd_rl_mrta --method ahd-rl --group G01 --type 1 --seed 123
 python -m ahd_rl_mrta --method ahd-rl-nca --group G01 --type 1 --seed 123
 python -m ahd_rl_mrta --method rca-rl --group G01 --type 1 --seed 123
-python -m ahd_rl_mrta --method taco --group G01 --type 1 --seed 123 --max-evals 1000
+python -m ahd_rl_mrta --method taco --group G01 --type 1 --seed 123 --max-evals 10000
 ```
 
 Run a supplied test instance with any method:

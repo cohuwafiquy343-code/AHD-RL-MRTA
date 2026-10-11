@@ -564,8 +564,23 @@ def maintain_archive(particles, old_archive, archive_size):
     return new_arch
 
 
+# 根据原实验配置，为不同任务规模选取种群与局部搜索参数。
+def get_slpso_params(task_count):
+    if task_count <= 50:
+        return dict(swarm_size=40, archive_size=40, Kls=2,
+                    Ils=10, Jls=10, Lls=10)
+    if task_count <= 100:
+        return dict(swarm_size=30, archive_size=30, Kls=2,
+                    Ils=8, Jls=8, Lls=8)
+    if task_count <= 200:
+        return dict(swarm_size=25, archive_size=25, Kls=2,
+                    Ils=6, Jls=6, Lls=6)
+    return dict(swarm_size=20, archive_size=20, Kls=1,
+                Ils=5, Jls=5, Lls=5)
+
+
 # SLPSO 单实例求解入口
-def slpso(instance, swarm_size=40, max_evals=4000, archive_size=40,
+def slpso(instance, swarm_size=40, max_evals=10000, archive_size=40,
           c1=1.49, c2=1.49, omega_s=0.9, omega_e=0.4,
           Kls=2, Ils=10, Jls=10, Lls=10):
     """在给定评估预算内更新粒子群，并返回找到的最优调度。"""

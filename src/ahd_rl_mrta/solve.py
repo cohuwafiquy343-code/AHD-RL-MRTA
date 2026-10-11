@@ -64,7 +64,7 @@ def _best_policy_result(candidates):
 
 
 def solve(instance, method='ahd-rl', model_dir=DEFAULT_MODEL_DIR,
-          sample=False, seed=0, max_evals=1000, samples=1):
+          sample=False, seed=0, max_evals=10000, samples=1):
     """求解一个内存中的实例，返回完成数量和调度长度。"""
     if method not in MODELS and method not in ('taco', 'sas', 'slpso'):
         raise ValueError('unknown method: {}'.format(method))
@@ -101,9 +101,12 @@ def solve(instance, method='ahd-rl', model_dir=DEFAULT_MODEL_DIR,
         from .baselines.sas.solver import solve as run
         makespan, _ = run(instance, max_evals=max_evals)
     else:
-        from .baselines.slpso.solver import load_instance_from_rl_dict, slpso
+        from .baselines.slpso.solver import (
+            get_slpso_params, load_instance_from_rl_dict, slpso,
+        )
         converted = load_instance_from_rl_dict(instance)
-        _, makespan = slpso(converted, max_evals=max_evals)
+        params = get_slpso_params(converted['N'])
+        _, makespan = slpso(converted, max_evals=max_evals, **params)
     completed = int(instance['N']) if np.isfinite(makespan) else 0
     return {'method': method, 'makespan': float(makespan) if completed else None,
             'completed_tasks': completed, 'total_tasks': int(instance['N']),

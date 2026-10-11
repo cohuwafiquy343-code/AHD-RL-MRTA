@@ -496,7 +496,7 @@ def update_pheromone(tau, iter_best_sched, iter_best_mksp,
 
 
 
-def solve(inst, max_evals=1000, ng=NG, alpha=ALPHA, beta=BETA,
+def solve(inst, max_evals=10000, ng=NG, alpha=ALPHA, beta=BETA,
           rho=RHO, p0=P0, l=L):
     """在评估预算内反复构造轨迹，返回最优完工时间和智能体序列。"""
     mk, sched = greedy_construct(inst)

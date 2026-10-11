@@ -27,7 +27,7 @@ def main():
     p.add_argument('--sample', action='store_true')
     p.add_argument('--samples', type=int, default=1,
                    help='number of sampled trajectories for a learned policy (default: 1)')
-    p.add_argument('--max-evals', type=int, default=1000)
+    p.add_argument('--max-evals', type=int, default=10000)
     p.add_argument('--instance', help='path to a supplied .npz instance')
     a = p.parse_args()
     if a.instance:
