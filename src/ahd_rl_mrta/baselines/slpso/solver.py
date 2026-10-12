@@ -1,12 +1,9 @@
-"""SLPSO 对比算法：粒子更新、局部搜索与单实例调度评估。"""
-
 from copy import deepcopy
 
 import numpy as np
 
 
 def load_instance_from_rl_dict(inst_dict):
-    """将生成器返回的内存实例转换为 SLPSO 使用的字段结构。"""
     M = int(inst_dict['M'])
     N = int(inst_dict['N'])
     K = 5
@@ -47,8 +44,8 @@ def load_instance_from_rl_dict(inst_dict):
         't_arrival': t_arrival,
     }
 
+
 def compute_time_factor(coalition, task_req, robot_capabilities):
-    """根据联盟超额能力计算任务执行时间系数。"""
     req_sum = int(np.sum(task_req))
     if req_sum == 0:
         return 1.0
@@ -71,9 +68,7 @@ def compute_time_factor(coalition, task_req, robot_capabilities):
     return max(0.25, 1.0 - reduction)
 
 
-# 联盟能力可行性
 def is_feasible(coalition, task_id, instance):
-    """检查联盟能力是否逐项满足任务需求。"""
     if not coalition:
         return False
     task_req = instance['task_requirements'][task_id]
@@ -89,9 +84,7 @@ def is_feasible(coalition, task_id, instance):
     return True
 
 
-# 按成员到达事件分段计算任务进度
 def evaluate(solution, instance):
-    """评估任务排列与联盟配置，返回完整调度的完工时间。"""
     perm = solution['perm']
     coalitions = solution['coalitions']
     M = instance['M']
@@ -172,9 +165,7 @@ def evaluate(solution, instance):
     return makespan
 
 
-# 解的表示
 def perm_to_adj(perm):
-    """把任务排列转为相邻任务边集合，供粒子速度更新使用。"""
     adj = {}
     if not perm:
         adj[-1] = set()
@@ -187,7 +178,6 @@ def perm_to_adj(perm):
 
 
 def generate_greedy_coalition(task_id, instance):
-    """为单个任务构造满足能力需求的初始联盟。"""
     K = instance['K']
     M = instance['M']
     robot_caps = instance['robot_capabilities']
@@ -208,9 +198,7 @@ def generate_greedy_coalition(task_id, instance):
     return coalition
 
 
-# 粒子速度更新
 def update_velocity(particle, pbest_sol, sbest_sol, omega, c1, c2, N):
-    """结合粒子历史最优解与群体参考解更新任务、智能体选择倾向。"""
     r1 = np.random.random()
     r2 = np.random.random()
     coeff1 = c1 * r1
@@ -278,9 +266,7 @@ def update_velocity(particle, pbest_sol, sbest_sol, omega, c1, c2, N):
     particle['V_R'] = new_VR
 
 
-# 解的构造
 def select_nearest(current, candidates, dm):
-    """从候选节点中选出与当前位置距离最近者。"""
     ci = 0 if current == -1 else current + 1
     best, best_d = None, float('inf')
     for t in candidates:
@@ -292,7 +278,6 @@ def select_nearest(current, candidates, dm):
 
 
 def select_robots_heuristic(task_id, task_idx, coal, cands, inst, avail, loc):
-    """按能力贡献和预计到达情况为当前任务补充智能体。"""
     K = inst['K']
     robots = inst['robots']
     dm = inst['dist_matrix']
@@ -341,7 +326,6 @@ def select_robots_heuristic(task_id, task_idx, coal, cands, inst, avail, loc):
 
 
 def construct_solution(particle, instance):
-    """依据粒子的任务与智能体选择倾向构造可评估的调度解。"""
     N = instance['N']
     M = instance['M']
     dm = instance['dist_matrix']
@@ -370,14 +354,12 @@ def construct_solution(particle, instance):
     cur = -1
     avail = [0.0] * M
     loc = [0] * M
-    current_time = 0.0  # 用于判断动态任务是否已经发布
+    current_time = 0.0
 
     for _ in range(N):
-        # 仅考虑已达到发布时间的任务
         if t_arrival is not None:
             avail_tasks = {t for t in unvis if float(t_arrival[t]) <= current_time}
             if not avail_tasks:
-                # 如果剩余任务均未发布，推进到最近的发布时间。
                 current_time = min(float(t_arrival[t]) for t in unvis)
                 avail_tasks = {t for t in unvis if float(t_arrival[t]) <= current_time}
         else:
@@ -399,7 +381,6 @@ def construct_solution(particle, instance):
         unvis.remove(sel)
         cur = sel
 
-        # 为当前任务构造执行联盟
         tid = sel
         ti = tid + 1
         UV_R = VR_cut.get(tid, set())
@@ -415,7 +396,6 @@ def construct_solution(particle, instance):
             coal = set(range(M))
         new_coal[tid] = coal
 
-        # 根据当前任务安排推进调度时间
         if coal:
             ma = 0.0
             for r in coal:
@@ -436,14 +416,11 @@ def construct_solution(particle, instance):
     return {'perm': new_perm, 'coalitions': new_coal}
 
 
-# 局部搜索
 def estimate_ms(perm, coalitions, instance):
-    """评估局部搜索产生的任务排列和联盟配置。"""
     return evaluate({'perm': perm, 'coalitions': coalitions}, instance)
 
 
 def mutate_coalition(orig_coal, task_id, M, instance):
-    """扰动任务联盟；不可行时返回 None。"""
     tc = set(orig_coal)
     op = np.random.randint(0, 3)
     if op == 0:
@@ -465,7 +442,6 @@ def mutate_coalition(orig_coal, task_id, M, instance):
 
 
 def local_search(solution, instance, I=10, J=10, L=10):
-    """在任务顺序与联盟成员两个空间中搜索邻近解。"""
     N = instance['N']
     M = instance['M']
     perm = list(solution['perm'])
@@ -517,9 +493,7 @@ def local_search(solution, instance, I=10, J=10, L=10):
     return {'perm': perm, 'coalitions': coal}, cur_ms
 
 
-# 存档选择与维护
 def select_sbest(particle, archive, gbest):
-    """为粒子选择速度更新时使用的群体参考解。"""
     if not archive:
         return gbest
     sa = sorted(archive, key=lambda x: x['ms'])
@@ -542,7 +516,6 @@ def select_sbest(particle, archive, gbest):
 
 
 def maintain_archive(particles, old_archive, archive_size):
-    """保留当前粒子和既有档案中的优良且不同的解。"""
     cands = list(old_archive)
     for p in particles:
         cands.append({'perm': list(p['perm']),
@@ -564,7 +537,6 @@ def maintain_archive(particles, old_archive, archive_size):
     return new_arch
 
 
-# 根据原实验配置，为不同任务规模选取种群与局部搜索参数。
 def get_slpso_params(task_count):
     if task_count <= 50:
         return dict(swarm_size=40, archive_size=40, Kls=2,
@@ -579,17 +551,15 @@ def get_slpso_params(task_count):
                 Ils=5, Jls=5, Lls=5)
 
 
-# SLPSO 单实例求解入口
 def slpso(instance, swarm_size=40, max_evals=10000, archive_size=40,
           c1=1.49, c2=1.49, omega_s=0.9, omega_e=0.4,
           Kls=2, Ils=10, Jls=10, Lls=10):
-    """在给定评估预算内更新粒子群，并返回找到的最优调度。"""
     N = instance['N']
     M = instance['M']
+    # The original budget counts swarm evaluations; local search evaluates separately.
     eval_cnt = [0]
 
     def ec_eval(sol):
-        """统计一次解评估并计算该解的完工时间。"""
         eval_cnt[0] += 1
         return evaluate(sol, instance)
 
@@ -621,7 +591,6 @@ def slpso(instance, swarm_size=40, max_evals=10000, archive_size=40,
             gbest = {'perm': list(pm),
                      'coalitions': {k: set(v) for k, v in cl.items()},
                      'ms': ms}
-
 
     archive = []
     while eval_cnt[0] < max_evals:
@@ -657,7 +626,6 @@ def slpso(instance, swarm_size=40, max_evals=10000, archive_size=40,
                      'coalitions': {k: set(v) for k, v in archive[0]['coalitions'].items()},
                      'ms': archive[0]['ms']}
 
-
         if archive and eval_cnt[0] < max_evals:
             ls_sols = [deepcopy(archive[0])]
             if len(archive) > 1:
@@ -691,7 +659,6 @@ def slpso(instance, swarm_size=40, max_evals=10000, archive_size=40,
                     if len(new_arch) >= archive_size:
                         break
             archive = new_arch
-
 
         if archive and archive[0]['ms'] < gbest_ms:
             gbest_ms = archive[0]['ms']

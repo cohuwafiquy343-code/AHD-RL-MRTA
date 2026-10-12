@@ -1,5 +1,3 @@
-"""在当前项目的实例上执行 RCA-RL 的任务选择与调度模拟。"""
-
 from __future__ import annotations
 
 import copy
@@ -8,13 +6,11 @@ from typing import Dict, List
 
 import numpy as np
 
-
 EPS = 1e-8
 
 
 class RCATaskEnv:
-    """使用原始单位模拟调度，仅对送入 RCA-RL 网络的观测进行归一化。"""
-
+    """Simulate project instances in original units and normalize network inputs."""
     def __init__(self, instance: dict):
         self.source_instance = copy.deepcopy(instance)
         self.instance_type = str(instance.get('instance_type', 'unknown'))
@@ -68,7 +64,6 @@ class RCATaskEnv:
 
     @staticmethod
     def _validate_instance(instance: dict) -> None:
-        """检查实例字段、数组维度及基本可行性。"""
         required = {
             'M', 'N', 'task_pos', 'robots_cap', 'robot_speeds',
             'robot_type_ids', 'task_req', 'task_duration', 't_arrival',
@@ -103,7 +98,6 @@ class RCATaskEnv:
             raise ValueError('At least one task requirement exceeds total capacity.')
 
     def _build_dictionaries(self) -> None:
-        """把数组格式的实例转换为 RCA-RL 原有的任务与智能体字典。"""
         inst = self.source_instance
         robot_types = np.asarray(inst['robot_type_ids'], dtype=np.int32)
         unique_types = sorted(int(value) for value in np.unique(robot_types))
@@ -199,7 +193,6 @@ class RCATaskEnv:
         self.tasks_range = (self.tasks_num, self.tasks_num)
 
     def init_state(self) -> None:
-        """重置任务完成状态和智能体路线。"""
         inst = self.source_instance
         task_req = np.asarray(inst['task_req'], dtype=np.float64)
         for task_id, task in self.task_dic.items():
@@ -234,13 +227,11 @@ class RCATaskEnv:
         self._log_releases()
 
     def _log_releases(self) -> None:
-        """把达到发布时间的任务标记为已开放。"""
         for task in self.task_dic.values():
             if task['release_time'] <= self.current_time + EPS:
                 task['released'] = True
 
     def get_unfinished_tasks(self) -> List[bool]:
-        """返回当前已开放且未完成的任务标记。"""
         self._log_releases()
         return [
             bool(task['released']
@@ -250,7 +241,6 @@ class RCATaskEnv:
         ]
 
     def get_contributable_task_mask(self, agent_id: int) -> np.ndarray:
-        """排除当前智能体不能贡献能力的任务。"""
         agent = self.agent_dic[agent_id]
         mask = np.ones(self.tasks_num, dtype=bool)
         for task in self.task_dic.values():
@@ -263,7 +253,6 @@ class RCATaskEnv:
         return mask
 
     def get_current_agent_status(self, agent: dict) -> np.ndarray:
-        """构造 RCA-RL 网络所需的团队智能体观测。"""
         status = []
         for other in self.agent_dic.values():
             if other['current_task'] >= 0:
@@ -277,9 +266,7 @@ class RCATaskEnv:
                         task['time_finish'] - self.current_time, 0.0)
                 else:
                     waiting_time = 0.0
-                    # Match the feature semantics used by the original model:
-                    # after execution starts this field is no longer exposed
-                    # as remaining work time.
+                    # The original policy observes zero remaining work once execution begins.
                     remaining_time = 0.0
             else:
                 travel_time = waiting_time = remaining_time = 0.0
@@ -294,7 +281,6 @@ class RCATaskEnv:
         return np.vstack(status)
 
     def get_current_task_status(self, agent: dict) -> np.ndarray:
-        """构造当前智能体视角下的候选任务观测。"""
         rows = []
         for task in self.task_dic.values():
             travel_time = (
@@ -321,7 +307,6 @@ class RCATaskEnv:
         return np.vstack([depot_row, *rows])
 
     def _coalition_duration(self, task: dict) -> float:
-        """计算当前任务联盟对应的执行时长。"""
         req = np.asarray(task['requirements'], dtype=np.float64)
         req_sum = float(req.sum())
         if req_sum <= 0 or not task['members']:
@@ -338,7 +323,6 @@ class RCATaskEnv:
         return float(task['base_time']) * (1.0 - speedup)
 
     def task_update(self) -> List[int]:
-        """检查联盟可行性、任务完成与等待超时，并返回新可行任务。"""
         newly_feasible = []
         for task in self.task_dic.values():
             if not task['released']:
@@ -382,7 +366,6 @@ class RCATaskEnv:
         all_assigned = all(
             task['feasible_assignment'] for task in self.task_dic.values())
         if all_assigned:
-            # 全部任务已有可行联盟后，恢复暂时无动作的智能体，使其能够返回站点。
             for agent in self.agent_dic.values():
                 if agent['no_choice']:
                     agent['no_choice'] = False
@@ -403,14 +386,12 @@ class RCATaskEnv:
         return newly_feasible
 
     def _release_abandoned_agent(self, agent_id: int) -> None:
-        """等待超时的智能体重新进入可决策状态。"""
         agent = self.agent_dic[agent_id]
         agent['assigned'] = False
         agent['no_choice'] = False
         agent['next_decision'] = float(self.current_time)
 
     def next_decision(self):
-        """选出下一决策时刻及在该时刻可决策的智能体。"""
         self._log_releases()
         decision_time = np.asarray(
             self.get_matrix(self.agent_dic, 'next_decision'), dtype=np.float64)
@@ -455,7 +436,6 @@ class RCATaskEnv:
         return (base_agents, blocked), float(base_next)
 
     def agent_step(self, agent_id: int, task_id: int, decision_step: int):
-        """记录智能体的任务动作、路程与预计到达时间。"""
         selected_id = int(task_id) - 1
         agent = self.agent_dic[agent_id]
         if selected_id >= 0:
@@ -491,7 +471,6 @@ class RCATaskEnv:
         return 0, True, newly_feasible
 
     def check_finished(self) -> bool:
-        """检查全部任务及智能体是否完成调度。"""
         self.task_update()
         decision_agents, current_time = self.next_decision()
         if len(decision_agents[0]) + len(decision_agents[1]) == 0:
@@ -506,14 +485,11 @@ class RCATaskEnv:
         return False
 
     def mark_terminated(self, reason: str) -> None:
-        """记录因时间、动作数量或停滞触发的提前终止。"""
         self.termination_reason = str(reason)
         self.finished = False
 
-    # RCA-RL 原有的观测与状态计算，与当前实例的调度逻辑共用同一环境。
     @staticmethod
     def get_matrix(dictionary, key):
-        """按字典顺序提取各节点的指定字段。"""
         key_matrix = []
         for value in dictionary.values():
             key_matrix.append(value[key])
@@ -521,29 +497,24 @@ class RCATaskEnv:
 
     @staticmethod
     def calculate_eulidean_distance(agent, task):
-        """计算智能体当前位置与任务位置之间的欧氏距离。"""
         return np.linalg.norm(agent['location'] - task['location'])
 
     def get_unfinished_task_mask(self):
-        """标记已完成任务，使其不再进入动作候选集合。"""
         mask = np.logical_not(self.get_unfinished_tasks())
         return mask
 
     def get_arrival_time(self, agent_id, task_id):
-        """读取智能体在当前路线中最近一次抵达该任务的时刻。"""
         arrival_time = self.agent_dic[agent_id]['arrival_time']
         arrival_for_task = np.where(np.array(self.agent_dic[agent_id]['route']) == task_id)[0][-1]
         return float(arrival_time[arrival_for_task])
 
     def get_abilities(self, members):
-        """累计指定智能体集合的能力向量。"""
         if len(members) == 0:
             return np.zeros(self.traits_dim)
         else:
             return np.sum(np.array([self.agent_dic[member]['abilities'] for member in members]), axis=0)
 
     def agent_update(self):
-        """依据任务执行状态更新各智能体的下一次决策时间。"""
         for agent in self.agent_dic.values():
             if agent['current_task'] < 0:
                 if np.all(self.get_matrix(self.task_dic, 'feasible_assignment')):
@@ -571,7 +542,6 @@ class RCATaskEnv:
                     agent['assigned'] = False
 
     def agent_observe(self, agent_id):
-        """构造当前智能体的任务、团队观测及动作掩码。"""
         agent = self.agent_dic[agent_id]
         mask = self.get_unfinished_task_mask()
         contributable_mask = self.get_contributable_task_mask(agent_id)

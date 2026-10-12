@@ -1,1 +1,0 @@
-"""Swarm Ant System baseline."""

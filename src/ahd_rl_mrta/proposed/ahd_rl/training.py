@@ -1,5 +1,3 @@
-"""用论文中的终端奖励与同实例多轨迹基线训练 AHD-RL。"""
-
 from __future__ import annotations
 
 import argparse
@@ -19,7 +17,6 @@ from .policy import run_episode
 
 
 def _group_id(value: str) -> int:
-    """接收论文组别 G01–G13，也接收对应数值。"""
     label = value.upper()
     if label.startswith("G"):
         label = label[1:]
@@ -29,7 +26,6 @@ def _group_id(value: str) -> int:
 
 
 def _stages(groups: Sequence[int]) -> List[List[int]]:
-    """按论文的小、中、大规模依次组织所选组别。"""
     ordered = sorted(
         set(groups), key=lambda group: (GROUPS[group][1], GROUPS[group][0])
     )
@@ -42,7 +38,6 @@ def _stages(groups: Sequence[int]) -> List[List[int]]:
 
 
 def _action_counts(actions: List[Tuple[int, int]]) -> Tuple[int, List[int]]:
-    """统计每个任务动作后用于确定联盟的智能体动作数。"""
     counts: List[int] = []
     for phase, _ in actions:
         if phase == PHASE_TASK_SELECT:
@@ -63,7 +58,7 @@ def _replay_gradient(
     advantage_scale: float,
     device: torch.device,
 ) -> float:
-    """重放采样动作，逐步累积归一化轨迹对数概率的梯度。"""
+    """Replay sampled actions with terminal advantage assigned to each task."""
     task_count, agent_counts = _action_counts(actions)
     env = ConstructionEnv(instance)
     env.reset()
@@ -137,14 +132,12 @@ def _replay_gradient(
         loss_value += float(step_loss.detach())
 
         if phase == PHASE_TASK_SELECT:
-            # 与推理一致，后续动作读取已选任务的固定表示。
             task_context = embeddings[choice].detach()
             coalition_state = None
             env._do_select_task(action, task_ctx=task_context.cpu().numpy())
         else:
             env.step(action)
             if action < env.M and env.phase != PHASE_TASK_SELECT:
-                # 联盟表示由本次选择后的成员集合计算，跨动作不保留计算图。
                 with torch.no_grad():
                     coalition_state = model.update_coal_state(
                         list(env.current_coalition), embeddings.detach(), device
@@ -169,7 +162,6 @@ def train(
     output: Optional[Path] = None,
     device: Optional[str] = None,
 ) -> Path:
-    """按所选组别训练模型，仅保存最终网络权重。"""
     if not groups or any(group not in GROUPS for group in groups):
         raise ValueError("groups must contain paper group numbers 1–13")
     if min(epochs_per_stage, updates_per_epoch, instances_per_update) < 1:
@@ -183,7 +175,7 @@ def train(
         device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
     model = SchedulingNetwork().to(chosen_device)
-    model.eval()  # 采样与梯度重放使用相同的确定性网络前向计算。
+    model.eval()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.98)
     scenario_keys = ("1", "2", "3")
@@ -216,7 +208,7 @@ def train(
                         instance_actions.append(actions)
                     sampled_actions.append(instance_actions)
 
-                # 每条轨迹与同实例的其他轨迹比较，再按整个更新批次的 RMS 归一化。
+                # Compare trajectories from the same instance before batch RMS scaling.
                 centered = (
                     trajectories * rewards - rewards.sum(dim=1, keepdim=True)
                 ) / (trajectories - 1)
@@ -271,7 +263,6 @@ def main() -> None:
         device=args.device,
     )
     print("weights saved to {}".format(path))
-
 
 if __name__ == "__main__":
     main()

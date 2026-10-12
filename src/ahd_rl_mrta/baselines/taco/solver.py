@@ -1,5 +1,3 @@
-"""TACO 对比算法：智能体独立选任务并按信息素构造调度。"""
-
 import random
 
 import numpy as np
@@ -11,12 +9,8 @@ RHO = 0.1
 P0 = 0.9
 L = 0.9
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 核心计算
-# ──────────────────────────────────────────────────────────────────────────────
 
 def can_contribute(robot_cap, task_req):
-    """判断智能体是否拥有任务所需的任一非零能力。"""
     for d in range(len(robot_cap)):
         if robot_cap[d] > 0 and task_req[d] > 0:
             return True
@@ -24,7 +18,6 @@ def can_contribute(robot_cap, task_req):
 
 
 def coalition_satisfies(coalition_caps_list, task_req):
-    """检查联盟累计能力是否覆盖任务的每项需求。"""
     if not coalition_caps_list:
         return False
     cap_sum = np.zeros(len(task_req), dtype=np.float64)
@@ -34,7 +27,6 @@ def coalition_satisfies(coalition_caps_list, task_req):
 
 
 def compute_exec_time(coalition_robot_ids, task_idx, inst):
-    """计算当前执行联盟对应的任务执行时长。"""
     robots_cap = inst['robots_cap']
     task_req = inst['task_req'][task_idx]
     task_dur = float(inst['task_duration'][task_idx])
@@ -51,7 +43,6 @@ def compute_exec_time(coalition_robot_ids, task_idx, inst):
 
 
 def simulate_task_execution(task_idx, coalition_robot_ids, t_arrive_dict, inst):
-    """按成员到达顺序推进任务进度并得到完成时刻。"""
     task_req = inst['task_req'][task_idx]
     robots_cap = inst['robots_cap']
     req_f = np.asarray(task_req, dtype=np.float64)
@@ -94,12 +85,7 @@ def simulate_task_execution(task_idx, coalition_robot_ids, t_arrive_dict, inst):
     return T_sat, T_complete, current_valid, wait_times
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 共享辅助函数
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _unlock_dynamic_tasks(available_tasks, completed, dyn_set, t_arrival_arr, t_now):
-    """把已达到发布时间的动态任务加入当前候选集合。"""
     for i in dyn_set:
         if i not in completed and i not in available_tasks:
             if t_now >= float(t_arrival_arr[i]):
@@ -108,7 +94,6 @@ def _unlock_dynamic_tasks(available_tasks, completed, dyn_set, t_arrival_arr, t_
 
 def _execute_coalition(task_idx, waiting, robot_schedules, inst,
                         t_free, pos_idx, active_robots, completed):
-    """执行满足需求的联盟；撤回未参与执行成员的临时调度记录。"""
     entries = waiting[task_idx]
     robot_ids = [e[0] for e in entries]
     t_arrive_dict = {e[0]: t_free[e[0]] for e in entries}
@@ -145,23 +130,17 @@ def _execute_coalition(task_idx, waiting, robot_schedules, inst,
 
 
 def build_eta_matrix(inst):
-    """由节点间距离生成任务转移的启发式矩阵。"""
     dm = inst['dist_mat']
     N = inst['N']
     size = N + 1
     sub = dm[:size, :size]
     mask = sub > 1e-12
-    safe = np.where(mask, sub, 1.0)  # 避免距离为零时发生除零
+    safe = np.where(mask, sub, 1.0)
     eta = np.where(mask, 1.0 / safe, 1e6)
     return eta
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 贪心初始解
-# ──────────────────────────────────────────────────────────────────────────────
-
 def greedy_construct(inst):
-    """以最早可用智能体和最近可达任务构造初始调度。"""
     M = inst['M']
     N = inst['N']
     dist_mat = inst['dist_mat']
@@ -254,13 +233,8 @@ def greedy_construct(inst):
     return makespan, robot_schedules
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# TACO 调度构造
-# ──────────────────────────────────────────────────────────────────────────────
-
 def handle_deadlock(waiting, robot_schedules, inst,
                     t_free, pos_idx, active_robots, completed):
-    """当候选任务均在等待联盟时，集中可用能力完成一个任务。"""
     if not waiting:
         return
 
@@ -317,7 +291,6 @@ def handle_deadlock(waiting, robot_schedules, inst,
         if np.all(cap_sum >= req):
             break
 
-    # 释放无法继续形成可行联盟的智能体
     for tid in list(waiting.keys()):
         if tid == best_task:
             continue
@@ -335,7 +308,6 @@ def handle_deadlock(waiting, robot_schedules, inst,
         _execute_coalition(best_task, waiting, robot_schedules, inst,
                            t_free, pos_idx, active_robots, completed)
     else:
-        # 释放剩余等待智能体，使调度继续推进
         for tid in list(waiting.keys()):
             for j, prev_t, prev_pos in waiting[tid]:
                 t_free[j] = prev_t + 0.01
@@ -345,7 +317,6 @@ def handle_deadlock(waiting, robot_schedules, inst,
 
 
 def taco_construct_solution(inst, tau, eta, alpha, beta, p0, l):
-    """根据信息素和启发值生成一条 TACO 调度轨迹。"""
     M = inst['M']
     N = inst['N']
     dist_mat = inst['dist_mat']
@@ -370,11 +341,9 @@ def taco_construct_solution(inst, tau, eta, alpha, beta, p0, l):
         if len(completed) >= N:
             break
 
-        # 按当前智能体时间开放已发布的动态任务
         t_now = max(t_free)
         _unlock_dynamic_tasks(available_tasks, completed, dyn_set, t_arrival_arr, t_now)
 
-        # 完成已经满足能力需求的联盟安排
         for tid in list(waiting.keys()):
             if tid in completed:
                 continue
@@ -392,7 +361,6 @@ def taco_construct_solution(inst, tau, eta, alpha, beta, p0, l):
 
         a = min(active_robots, key=lambda j: t_free[j])
 
-        # 排除已有可行联盟的任务
         sat_tasks = set()
         for tid, elist in waiting.items():
             if coalition_satisfies([robots_cap[e[0]] for e in elist], task_req[tid]):
@@ -413,7 +381,6 @@ def taco_construct_solution(inst, tau, eta, alpha, beta, p0, l):
                 break
             continue
 
-        # 结合信息素与启发值选择任务
         curr_node = pos_idx[a]
         weights = {}
         for n in candidates:
@@ -474,7 +441,6 @@ def taco_construct_solution(inst, tau, eta, alpha, beta, p0, l):
 
 def update_pheromone(tau, iter_best_sched, iter_best_mksp,
                      global_best_sched, global_best_mksp, rho, M):
-    """先蒸发信息素，再强化本轮和全局最优的智能体路线。"""
     for a in range(M):
         tau[a] *= (1.0 - rho)
 
@@ -495,10 +461,8 @@ def update_pheromone(tau, iter_best_sched, iter_best_mksp,
                 tau[a][0][prev_u] = 0.5 * tau[a][0][prev_u] + 0.5 * deposit
 
 
-
 def solve(inst, max_evals=10000, ng=NG, alpha=ALPHA, beta=BETA,
           rho=RHO, p0=P0, l=L):
-    """在评估预算内反复构造轨迹，返回最优完工时间和智能体序列。"""
     mk, sched = greedy_construct(inst)
     M, N = inst['M'], inst['N']
     tau = [np.full((N + 1, N + 1), 1.0 / (mk + 1e-9)) for _ in range(M)]

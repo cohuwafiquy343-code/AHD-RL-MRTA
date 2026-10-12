@@ -1,4 +1,3 @@
-"""单实例推理命令行入口。"""
 import argparse
 from .solve import solve, solve_generated
 from .example_instances import load_example_instance
@@ -6,7 +5,6 @@ from .proposed.ahd_rl.config import GROUPS
 
 
 def _group_id(value):
-    """将 G01–G13 或数值 1–13 转换为论文组别编号。"""
     label = str(value).upper()
     if label.startswith('G'):
         label = label[1:]
@@ -16,7 +14,6 @@ def _group_id(value):
 
 
 def main():
-    """解析运行参数并打印单实例调度结果。"""
     p = argparse.ArgumentParser(description='Solve one MRTA instance')
     p.add_argument('--method', choices=['ahd-rl','ahd-rl-nca','ahd-rl-nrt','ahd-rl-ncr',
                                         'rca-rl','taco','sas','slpso'], default='ahd-rl')
@@ -31,7 +28,6 @@ def main():
     p.add_argument('--instance', help='path to a supplied .npz instance')
     a = p.parse_args()
     if a.instance:
-        # 样例实例直接进入统一求解入口，不再重新生成问题。
         instance = load_example_instance(a.instance)
         result = solve(instance, method=a.method, seed=a.seed, sample=a.sample,
                        samples=a.samples, max_evals=a.max_evals)

@@ -1,4 +1,3 @@
-"""使用已加载的 AHD-RL 策略，在单个实例上构造调度。"""
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -14,7 +13,6 @@ from .model import SchedulingNetwork
 def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
                 greedy: bool = True, device: Optional[torch.device] = None
                 ) -> Tuple[float, List[Tuple[int, int]]]:
-    """按任务动作与智能体动作推进环境，返回完工时间和动作序列。"""
     if device is None:
         device = next(model.parameters()).device
     env.reset()
@@ -33,7 +31,6 @@ def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
                 task_features, robot_features, mask_np = features
 
             if not mask_np.any():
-                # 当前阶段无合法动作时，由环境处理终止或不可行状态。
                 env.step(env.M if phase == PHASE_ROBOT_ACCEL else -1)
                 if env.phase == PHASE_TASK_SELECT and phase != PHASE_TASK_SELECT:
                     task_context = None
@@ -44,7 +41,6 @@ def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
             rf = torch.from_numpy(robot_features).float().to(device)
             mask = torch.from_numpy(mask_np).to(device)
             if phase == PHASE_TASK_SELECT:
-                # 任务决策使用当前任务、智能体及能力贡献掩码。
                 inst = env.inst
                 active_array = np.array(active_ids, dtype=np.int32)
                 contributions = torch.from_numpy(
@@ -55,7 +51,6 @@ def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
                     tf, rf, mask, contrib_mask=contributions,
                     depot_feat=torch.from_numpy(depot).to(device))
             else:
-                # 智能体决策同时使用剩余需求、已选任务表示及当前联盟状态。
                 inst = env.inst
                 required = inst['task_req'][env.current_task].astype(np.float32)
                 gap = np.maximum(0.0, required - env.current_coalition_cap.astype(np.float32))
@@ -74,7 +69,6 @@ def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
                             int(torch.distributions.Categorical(probs=probabilities).sample().item()))
 
             if phase == PHASE_TASK_SELECT:
-                # 保存本次任务表示，供该任务后续的智能体动作使用。
                 task_context = task_embeddings[action_index].detach().cpu().numpy()
                 coalition_state = None
                 task_id = active_ids[action_index]
@@ -84,7 +78,6 @@ def run_episode(env: ConstructionEnv, model: SchedulingNetwork,
                 actions.append((phase, action_index))
                 env.step(action_index)
                 if phase in (PHASE_ROBOT_SATISFY, PHASE_ROBOT_ACCEL) and action_index < env.M:
-                    # 只有真实智能体动作改变联盟表示；终止动作不加入成员。
                     indices = list(env.current_coalition)
                     coalition_state = model.update_coal_state(
                         indices, robot_embeddings.detach(), device).cpu().numpy().astype(np.float16)
