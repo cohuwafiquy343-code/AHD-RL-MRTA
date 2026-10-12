@@ -1,5 +1,3 @@
-"""RCA-RL 对比方法的注意力网络与动作评分。"""
-
 import math
 
 import numpy as np
@@ -8,19 +6,17 @@ import torch.nn as nn
 
 
 def get_attn_pad_mask(seq_q, seq_k):
-    """依据零填充位置构造查询与键之间的注意力掩码。"""
     batch_size, len_q = seq_q.sum(dim=2).size()
     batch_size, len_k = seq_k.sum(dim=2).size()
-    # 全零行视为填充节点，不参与注意力。
-    pad_attn_mask_k = seq_q.eq(0).all(2).data.eq(1).unsqueeze(1)  # batch_size x 1 x len_q, one is masking
-    pad_attn_mask_q = seq_k.eq(0).all(2).data.eq(1).unsqueeze(1)  # batch_size x 1 x len_k, one is masking
+
+    pad_attn_mask_k = seq_q.eq(0).all(2).data.eq(1).unsqueeze(1)
+    pad_attn_mask_q = seq_k.eq(0).all(2).data.eq(1).unsqueeze(1)
     pad_attn_mask_k = pad_attn_mask_k.expand(batch_size, len_k, len_q).permute(0, 2, 1)
     pad_attn_mask_q = pad_attn_mask_q.expand(batch_size, len_q, len_k)
-    return ~torch.logical_and(~pad_attn_mask_k, ~pad_attn_mask_q)  # batch_size x len_q x len_k
+    return ~torch.logical_and(~pad_attn_mask_k, ~pad_attn_mask_q)
 
 
 class SingleHeadAttention(nn.Module):
-    """对一组候选节点计算单头注意力分数。"""
     def __init__(self, embedding_dim):
         super(SingleHeadAttention, self).__init__()
         self.input_dim = embedding_dim
@@ -41,30 +37,29 @@ class SingleHeadAttention(nn.Module):
             param.data.uniform_(-stdv, stdv)
 
     def forward(self, q, h=None, mask=None):
-        """计算查询与候选节点的注意力；掩码中的 True 表示不可选择。"""
         if h is None:
             h = q
 
         batch_size, target_size, input_dim = h.size()
         n_query = q.size(1)
 
-        h_flat = h.reshape(-1, input_dim)  # (batch_size*graph_size)*input_dim
-        q_flat = q.reshape(-1, input_dim)  # (batch_size*n_query)*input_dim
+        h_flat = h.reshape(-1, input_dim)
+        q_flat = q.reshape(-1, input_dim)
 
         shape_k = (batch_size, target_size, -1)
         shape_q = (batch_size, n_query, -1)
 
-        Q = torch.matmul(q_flat, self.w_query).view(shape_q)  # batch_size*n_query*key_dim
-        K = torch.matmul(h_flat, self.w_key).view(shape_k)  # batch_size*targets_size*key_dim
+        Q = torch.matmul(q_flat, self.w_query).view(shape_q)
+        K = torch.matmul(h_flat, self.w_key).view(shape_k)
 
-        U = self.norm_factor * torch.matmul(Q, K.transpose(1, 2))  # batch_size*n_query*targets_size
+        U = self.norm_factor * torch.matmul(Q, K.transpose(1, 2))
         U = self.tanh_clipping * torch.tanh(U)
 
         if mask is not None:
-            mask = mask.view(batch_size, -1, target_size).expand_as(U)  # copy for n_heads times
+            mask = mask.view(batch_size, -1, target_size).expand_as(U)
             U[mask.bool()] = -1e8
-        attention = torch.softmax(U, dim=-1)  # batch_size*n_query*targets_size
-        logp_list = torch.log_softmax(U, dim=-1)  # batch_size*n_query*targets_size
+        attention = torch.softmax(U, dim=-1)
+        logp_list = torch.log_softmax(U, dim=-1)
 
         probs = attention
 
@@ -72,7 +67,6 @@ class SingleHeadAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    """并行计算多个注意力头，再合并节点表示。"""
     def __init__(self, embedding_dim, n_heads=8):
         super(MultiHeadAttention, self).__init__()
         self.n_heads = n_heads
@@ -95,49 +89,47 @@ class MultiHeadAttention(nn.Module):
             param.data.uniform_(-stdv, stdv)
 
     def forward(self, q, h=None, mask=None):
-        """汇合各注意力头的节点表示；掩码中的 True 表示不可选择。"""
         if h is None:
             h = q
 
         batch_size, target_size, input_dim = h.size()
         n_query = q.size(1)
 
-        h_flat = h.contiguous().view(-1, input_dim)  # (batch_size*graph_size)*input_dim
-        q_flat = q.contiguous().view(-1, input_dim)  # (batch_size*n_query)*input_dim
+        h_flat = h.contiguous().view(-1, input_dim)
+        q_flat = q.contiguous().view(-1, input_dim)
         shape_v = (self.n_heads, batch_size, target_size, -1)
         shape_k = (self.n_heads, batch_size, target_size, -1)
         shape_q = (self.n_heads, batch_size, n_query, -1)
 
-        Q = torch.matmul(q_flat, self.w_query).view(shape_q)  # n_heads*batch_size*n_query*key_dim
-        K = torch.matmul(h_flat, self.w_key).view(shape_k)  # n_heads*batch_size*targets_size*key_dim
-        V = torch.matmul(h_flat, self.w_value).view(shape_v)  # n_heads*batch_size*targets_size*value_dim
+        Q = torch.matmul(q_flat, self.w_query).view(shape_q)
+        K = torch.matmul(h_flat, self.w_key).view(shape_k)
+        V = torch.matmul(h_flat, self.w_value).view(shape_v)
 
-        U = self.norm_factor * torch.matmul(Q, K.transpose(2, 3))  # n_heads*batch_size*n_query*targets_size
+        U = self.norm_factor * torch.matmul(Q, K.transpose(2, 3))
 
         if mask is not None:
-            mask = mask.view(1, batch_size, -1, target_size).expand_as(U)  # copy for n_heads times
+            mask = mask.view(1, batch_size, -1, target_size).expand_as(U)
             U[mask.bool()] = -np.inf
-        attention = torch.softmax(U, dim=-1)  # n_heads*batch_size*n_query*targets_size
+        attention = torch.softmax(U, dim=-1)
 
         if mask is not None:
             attnc = attention.clone()
             attnc[mask.bool()] = 0
             attention = attnc
 
-        heads = torch.matmul(attention, V)  # n_heads*batch_size*n_query*value_dim
+        heads = torch.matmul(attention, V)
 
         out = torch.mm(
             heads.permute(1, 2, 0, 3).reshape(-1, self.n_heads * self.value_dim),
-            # batch_size*n_query*n_heads*value_dim
+
             self.w_out.view(-1, self.embedding_dim)
-            # n_heads*value_dim*embedding_dim
+
         ).view(batch_size, n_query, self.embedding_dim)
 
-        return out  # batch_size*n_query*embedding_dim
+        return out
 
 
 class GateFFNDense(nn.Module):
-    """门控前馈变换，保留原 RCA-RL 网络参数布局。"""
     def __init__(self, model_dim, hidden_unit=512):
         super(GateFFNDense, self).__init__()
         self.W = nn.Linear(model_dim, hidden_unit, bias=False)
@@ -154,7 +146,6 @@ class GateFFNDense(nn.Module):
 
 
 class GateFFNLayer(nn.Module):
-    """前馈变换及残差连接。"""
     def __init__(self, model_dim):
         super(GateFFNLayer, self).__init__()
         self.DenseReluDense = GateFFNDense(model_dim)
@@ -167,7 +158,6 @@ class GateFFNLayer(nn.Module):
 
 
 class Normalization(nn.Module):
-    """对节点嵌入执行归一化。"""
     def __init__(self, embedding_dim):
         super(Normalization, self).__init__()
         self.normalizer = nn.LayerNorm(embedding_dim)
@@ -177,7 +167,6 @@ class Normalization(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    """任务或智能体编码器中的自注意力层。"""
     def __init__(self, embedding_dim, n_head):
         super(EncoderLayer, self).__init__()
         self.multiHeadAttention = MultiHeadAttention(embedding_dim, n_head)
@@ -196,7 +185,6 @@ class EncoderLayer(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    """使用自注意力和交叉注意力更新查询表示。"""
     def __init__(self, embedding_dim, n_head):
         super(DecoderLayer, self).__init__()
         self.dec_self_attn = MultiHeadAttention(embedding_dim, n_head)
@@ -218,7 +206,6 @@ class DecoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    """堆叠 RCA-RL 编码层。"""
     def __init__(self, embedding_dim=128, n_head=4, n_layer=2):
         super(Encoder, self).__init__()
         self.layers = nn.ModuleList(EncoderLayer(embedding_dim, n_head) for i in range(n_layer))
@@ -230,7 +217,6 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    """堆叠 RCA-RL 解码层。"""
     def __init__(self, embedding_dim=128, n_head=4, n_layer=2):
         super(Decoder, self).__init__()
         self.layers = nn.ModuleList([DecoderLayer(embedding_dim, n_head) for i in range(n_layer)])
@@ -242,11 +228,10 @@ class Decoder(nn.Module):
 
 
 class AttentionNet(nn.Module):
-    """根据当前智能体与团队任务状态输出任务动作概率。"""
     def __init__(self, agent_input_dim, task_input_dim, embedding_dim):
         super(AttentionNet, self).__init__()
         self.agent_embedding = nn.Linear(agent_input_dim, embedding_dim)
-        self.task_embedding = nn.Linear(task_input_dim, embedding_dim)  # layer for input information
+        self.task_embedding = nn.Linear(task_input_dim, embedding_dim)
         self.fusion = nn.Linear(embedding_dim * 3, embedding_dim)
 
         self.taskEncoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)

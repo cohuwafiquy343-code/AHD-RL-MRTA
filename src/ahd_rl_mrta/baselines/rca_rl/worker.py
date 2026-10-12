@@ -1,5 +1,3 @@
-"""RCA-RL 在单个实例上的策略推理。"""
-
 import random
 
 import numpy as np
@@ -8,8 +6,6 @@ from torch.distributions import Categorical
 
 
 class Worker:
-    """按可决策时间依次调用 RCA-RL 策略。"""
-
     def __init__(self, network, device='cpu'):
         self.device = device
         self.local_net = network
@@ -18,7 +14,6 @@ class Worker:
     def run_episode(self, sample=False,
                     inference_seed=None, deterministic_order=False,
                     max_time=None, max_decisions=None):
-        """运行一条轨迹；sample 控制采样或贪婪选取动作。"""
         current_action_index = 0
         decision_step = 0
         time_limit = float(
@@ -38,7 +33,6 @@ class Worker:
                and self.env.current_time < time_limit
                and current_action_index < decision_limit):
             with torch.no_grad():
-                # 同一时刻可决策的智能体依次选择任务。
                 release_agents, current_time = self.env.next_decision()
                 self.env.current_time = current_time
                 had_release = bool(release_agents[0] or release_agents[1])
@@ -95,7 +89,6 @@ class Worker:
             self.env.mark_terminated(reason)
 
     def convert_torch(self, args):
-        """把环境观测转为策略网络所需的浮点张量。"""
         data = []
         for arg in args:
             data.append(torch.tensor(arg, dtype=torch.float).to(self.device))

@@ -1,11 +1,9 @@
-"""读取仓库随附的小规模 MRTA 测试实例。"""
 from pathlib import Path
 
 import numpy as np
 
 
 def load_example_instance(path):
-    """读取 NumPy 实例，并恢复调度器使用的集合与标量字段。"""
     with np.load(str(Path(path)), allow_pickle=False) as archive:
         instance = {key: archive[key].copy() for key in archive.files}
 

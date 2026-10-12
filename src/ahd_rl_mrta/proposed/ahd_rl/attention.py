@@ -1,12 +1,11 @@
-"""AHD-RL 网络复用的自注意力、交叉注意力与门控前馈模块。"""
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-class GatedFFN(nn.Module):
-    """SwiGLU 门控前馈网络：FFN(x) = W2(SiLU(Wg*x) ⊙ Wv*x)"""
 
+
+class GatedFFN(nn.Module):
     def __init__(self, d_model: int, d_hidden: int, dropout: float):
         super().__init__()
         self.Wg = nn.Linear(d_model, d_hidden, bias=False)
@@ -18,12 +17,7 @@ class GatedFFN(nn.Module):
         return self.W2(self.drop(F.silu(self.Wg(x)) * self.Wv(x)))
 
 
-# ─────────────────────────────────────────────────────────────
-# 4. NEURAL NETWORK
-# ─────────────────────────────────────────────────────────────
-
 class PreLNLayer(nn.Module):
-    """先归一化，再执行自注意力和前馈变换。"""
     def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
@@ -53,7 +47,6 @@ class PreLNLayer(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    """堆叠自注意力层以编码同一类实体。"""
     def __init__(self, n_layers: int, d_model: int, n_heads: int,
                  d_ff: int, dropout: float):
         super().__init__()
@@ -67,16 +60,14 @@ class TransformerEncoder(nn.Module):
             attn_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         for i, layer in enumerate(self.layers):
-            # 注意力偏置仅传给首层，其余层沿用编码后的表示。
             if i == 0 and attn_bias is not None:
                 x = layer(x, key_padding_mask, attn_bias=attn_bias)
             else:
                 x = layer(x, key_padding_mask)
         return x
 
-class CrossAttentionLayer(nn.Module):
-    """以 x 为查询、另一类实体的 context 为键和值进行交叉注意力。"""
 
+class CrossAttentionLayer(nn.Module):
     def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float):
         super().__init__()
         self.ln_q = nn.LayerNorm(d_model)
@@ -102,9 +93,8 @@ class CrossAttentionLayer(nn.Module):
         x = x + self.ff(h)
         return x
 
-class CrossDecoder(nn.Module):
-    """堆叠跨注意力层，逐层更新查询实体的表示。"""
 
+class CrossDecoder(nn.Module):
     def __init__(
         self, n_layers: int, d_model: int, n_heads: int, d_ff: int, dropout: float
     ):

@@ -1,5 +1,3 @@
-"""生成调度实例，并按 AHD-RL 的任务与智能体动作构造调度。"""
-
 import math
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -15,12 +13,6 @@ from .config import (
 
 def generate_instance(group_id: int, seed: int = None, all_static: bool = False,
                       task_req_mode: str = 'default') -> dict:
-    """按组别和随机种子生成智能体、任务及能力需求。
-
-    task_req_mode:
-      'default'   : 50% 单智能体、25% 简单协作、25% 困难协作
-      'easy_coop' : 50% 单智能体、50% 简单协作
-    """
     M, N = GROUPS[group_id]
     n_types = ROBOT_TYPES[group_id]
     rng = np.random.default_rng(seed)
@@ -62,7 +54,6 @@ def generate_instance(group_id: int, seed: int = None, all_static: bool = False,
     cap_max = robots_cap.max(axis=0)
     cap_sum_all = robots_cap.sum(axis=0)
 
-    # N1 单机器人可完成任务（所有模式共用）
     base_per = N1 // M
     extra_r = N1 % M
     idx = 0
@@ -80,7 +71,6 @@ def generate_instance(group_id: int, seed: int = None, all_static: bool = False,
             idx += 1
 
     if task_req_mode == 'easy_coop':
-        # N - N1 简单协作任务：各维需求 ≤ 各机器人类型能力最大值
         for i in range(N1, N):
             while True:
                 req = np.array(
@@ -90,7 +80,7 @@ def generate_instance(group_id: int, seed: int = None, all_static: bool = False,
                 if req.sum() > 0:
                     task_req[i] = req
                     break
-    else:  # 'default'：N2 简单协作 + 剩余困难协作
+    else:
         for i in range(N1, N1 + N2):
             while True:
                 req = np.array(
@@ -172,7 +162,6 @@ def generate_instance(group_id: int, seed: int = None, all_static: bool = False,
 
 
 def generate_instance_by_type(group_id: int, type_key: str, seed: int) -> dict:
-    """按场景编号生成一个可直接传入求解器的实例。"""
     spec = INSTANCE_TYPES[str(type_key)]
     base = generate_instance(
         group_id,
@@ -185,7 +174,6 @@ def generate_instance_by_type(group_id: int, type_key: str, seed: int) -> dict:
 
 
 def has_contribution(cap_j: np.ndarray, req_i: np.ndarray) -> bool:
-    """判断智能体是否具有当前任务需要的至少一项能力。"""
     return bool(np.any((cap_j > 0) & (req_i > 0)))
 
 
@@ -195,7 +183,7 @@ def coalition_exec_time(
     task_req_i: np.ndarray,
     task_dur_i: float,
 ) -> float:
-    """按现有仿真规则计算给定联盟的任务执行时间。"""
+    # Only agents with a required skill contribute to the capped speedup.
     req_sum = int(task_req_i.sum())
     if req_sum == 0 or not coal_set:
         return float(task_dur_i)
@@ -213,7 +201,6 @@ def coalition_satisfies(
     robots_cap: np.ndarray,
     task_req_i: np.ndarray,
 ) -> bool:
-    """逐项检查联盟能力是否满足任务需求。"""
     if not coal_set:
         return False
     cap = np.zeros(D_CAP, dtype=np.int64)
@@ -222,18 +209,7 @@ def coalition_satisfies(
     return bool(np.all(cap >= task_req_i))
 
 
-# ─────────────────────────────────────────────────────────────
-# 2. INSTANCE GENERATION
-# ─────────────────────────────────────────────────────────────
-
 def _build_instance_caches(inst: dict) -> None:
-    """预计算实例内复用字段（幂等）。
-
-    缓存字段：
-      all_pos             (N+1, 2) float32  行0=depot，行i+1=任务i（原始坐标）
-      dist_mat            (N+1, N+1) float64 欧氏距离矩阵（旧实例缺失时自动重建）
-      robot_task_contrib  (M, N)   bool
-    """
     if 'all_pos' not in inst:
         depot = inst['depot']
         all_pos = np.vstack([depot.reshape(1, 2), inst['task_pos']])
@@ -249,13 +225,8 @@ def _build_instance_caches(inst: dict) -> None:
         inst['robot_task_contrib'] = (
             ((caps[:, None, :] > 0) & (reqs[None, :, :] > 0)).any(axis=2))
 
-# ─────────────────────────────────────────────────────────────
-# 2b. SCHEDULE CONSTRUCTION
-# ─────────────────────────────────────────────────────────────
 
 class ConstructionEnv:
-    """维护已形成的智能体任务序列和当前正在确定的任务联盟。"""
-
     def __init__(self, inst: dict):
         _build_instance_caches(inst)
         self.inst = inst
@@ -263,9 +234,7 @@ class ConstructionEnv:
         self.N = inst['N']
         self._init_speed_het()
 
-    # ── 速度异质性预计算 ────────────────────────────────────────────────
     def _init_speed_het(self) -> None:
-        """预计算团队速度差异及各智能体的相对慢速指标。"""
         speeds = self.inst['robot_speeds']
         unique_v = sorted(set(float(v) for v in speeds))
         K = len(unique_v)
@@ -282,9 +251,7 @@ class ConstructionEnv:
             self.gamma_het = 0.0
             self.phi_slow = np.zeros(self.M, dtype=np.float32)
 
-    # ── 复位 ────────────────────────────────────────────────────────────
     def reset(self) -> None:
-        """初始化智能体可用时间、任务状态与当前决策阶段。"""
         inst = self.inst
         M, N = self.M, self.N
 
@@ -318,14 +285,11 @@ class ConstructionEnv:
         self.current_task_complete_time = INF
         self.coal_late_arr: float = 0.0
 
-
         self._unlock_dynamic_tasks()
         if not self.remaining_tasks:
             self._finalize()
 
-    # ── 动态任务解锁 ────────────────────────────────────────────────────
     def _unlock_dynamic_tasks(self) -> None:
-        """根据团队当前可用时间开放达到发布时间的动态任务。"""
         inst = self.inst
         t_max = float(self.t_free.max()) if self.M > 0 else 0.0
         for i in inst['dyn_set']:
@@ -335,9 +299,7 @@ class ConstructionEnv:
                 self.dynamic_unlocked[i] = True
                 self.remaining_tasks.add(i)
 
-    # ── 到达时间计算 ────────────────────────────────────────────────────
     def _t_arr(self, j: int, i: int) -> float:
-        """机器人 j 到任务 i 的预计到达时刻。"""
         inst = self.inst
         p_from = int(self.p_last_idx[j])
         dist = float(inst['dist_mat'][p_from][i + 1])
@@ -347,14 +309,13 @@ class ConstructionEnv:
             t_arrive = max(t_arrive, float(inst['t_arrival'][i]))
         return t_arrive
 
-    # ── 联盟完成时间计算 ─────────────────────────────────────────────────
     def _compute_coalition_times(
         self,
         i: int,
         coalition: Set[int],
         arr: Dict[int, float],
     ) -> Tuple[float, float]:
-        """按成员到达顺序累计执行进度，返回需求满足与完成时刻。"""
+        # Later arrivals change the execution rate only while work remains.
         inst = self.inst
         sorted_m = sorted(coalition, key=lambda j: arr[j])
         cum_cap = np.zeros(D_CAP, dtype=np.int64)
@@ -373,7 +334,6 @@ class ConstructionEnv:
             init_coal, inst['robots_cap'], inst['task_req'][i], inst['task_duration'][i])
         t_complete = t_sat + et
 
-        # 晚到成员的进度追踪
         progress = 0.0
         cur_et = et
         last_seg = t_sat
@@ -396,7 +356,6 @@ class ConstructionEnv:
         return t_sat, t_complete
 
     def _recompute_current_times(self) -> None:
-        """根据当前联盟重新计算任务 i 的完成时刻并更新 current_task_complete_time。"""
         i = self.current_task
         arr = {}
         for j in self.current_coalition:
@@ -405,9 +364,7 @@ class ConstructionEnv:
         self.task_sat_time[i] = t_sat
         self.current_task_complete_time = t_complete
 
-    # ── 加速阶段：计算加入机器人 j 后的新完成时刻 ───────────────────────
     def _completion_time_with_agent(self, i: int, j: int, t_arr_j: float) -> float:
-        """估计候选智能体加入后当前任务的完成时刻。"""
         new_coal = self.current_coalition | {j}
         arr = {}
         for jj in new_coal:
@@ -419,27 +376,16 @@ class ConstructionEnv:
         return t_c
 
     def _all_t_arr(self, task_id: int) -> np.ndarray:
-        """计算全部智能体到目标任务的预计到达时刻，返回长度为 M 的向量。"""
         inst = self.inst
-        dist = inst['dist_mat'][self.p_last_idx, task_id + 1]  # (M,)，fancy indexing
-        t_arr = self.t_free + dist / np.maximum(inst['robot_speeds'], EPS)  # (M,)
+        dist = inst['dist_mat'][self.p_last_idx, task_id + 1]
+        t_arr = self.t_free + dist / np.maximum(inst['robot_speeds'], EPS)
         if task_id in inst['dyn_set']:
             t_arr = np.maximum(t_arr, float(inst['t_arrival'][task_id]))
         return t_arr.astype(np.float64)
 
-    # ── 特征：速度异质性相关 ─────────────────────────────────────────────
     def _estimate_wait_and_var(
             self, i: int, arr_times: Optional[np.ndarray] = None
     ) -> Tuple[float, float, float, float, int]:
-        """估算任务 i 的等待代价等统计量。
-
-        返回 (w_est, sigma_i, w_ref, t_late_ref, n_ref)：
-          w_est     : 各成员相对 t_sat 的等待之和（原始值）
-          sigma_i   : 参考联盟到达时刻标准差（sqrt(Var)，原始值）
-          w_ref     : 各成员相对首到达机器人的额外等待之和（原始值）
-          t_late_ref: 参考联盟最晚到达成员的到达时刻
-          n_ref     : 参考联盟规模（最小满足联盟成员数）
-        """
         inst = self.inst
         req = inst['task_req'][i]
         caps = inst['robots_cap']
@@ -472,9 +418,7 @@ class ConstructionEnv:
         t_late_ref = t_sat
         return w_est, sigma_i, w_ref, t_late_ref, n_ref
 
-    # ── 任务特征（任务选择阶段）──────────────────────────────────────────
     def _task_features_all(self, active_ids: List[int]) -> np.ndarray:
-        """构造任务动作观测；第 6、7、12、13、14 列为 NRT 移除的信息。"""
         inst = self.inst
         N_act = len(active_ids)
         feat = np.zeros((N_act, TASK_SELECT_FEAT_DIM), dtype=np.float32)
@@ -526,9 +470,7 @@ class ConstructionEnv:
 
         return feat
 
-    # ── 当前任务特征（机器人选择阶段）──────────────────────────────────
     def _task_feature_current(self) -> np.ndarray:
-        """构造当前任务观测；第 11、12、17、18、19 列为参考联盟信息。"""
         inst = self.inst
         i = self.current_task
         feat = np.zeros((1, ROBOT_TASK_FEAT_DIM), dtype=np.float32)
@@ -569,7 +511,6 @@ class ConstructionEnv:
         return feat[0]
 
     def _coalition_surplus_ratio(self, coal_set: Set[int], task_id: int) -> float:
-        """计算现有仿真规则中的联盟超额能力比例，上限为 0.75。"""
         req_sum = int(self.inst['task_req'][task_id].sum())
         if req_sum == 0:
             return 0.75
@@ -580,9 +521,7 @@ class ConstructionEnv:
         cap_sum = int(sum(self.inst['robots_cap'][j].sum() for j in contrib))
         return min(max(0, cap_sum - req_sum) / req_sum, 0.75)
 
-    # ── 机器人特征（通用）────────────────────────────────────────────────
     def _robot_features(self, i_target: int) -> np.ndarray:
-        """构造智能体特征；第 15 列指示智能体是否已进入当前联盟。"""
         inst = self.inst
         M = self.M
         feat = np.zeros((M, ROBOT_FEAT_DIM), dtype=np.float32)
@@ -613,7 +552,6 @@ class ConstructionEnv:
             self.t_free / max(t_max, EPS), 0.0, 1.0
         ).astype(np.float32)
 
-        # 当前位置坐标及到站点距离
         pos_x = (inst['all_pos'][self.p_last_idx, 0] / 100.0).astype(np.float32)
         pos_y = (inst['all_pos'][self.p_last_idx, 1] / 100.0).astype(np.float32)
         depot_dists = inst['dist_mat'][self.p_last_idx, 0].astype(np.float32)
@@ -631,7 +569,6 @@ class ConstructionEnv:
         feat[:, 20] = (depot_dists / D_MAP).astype(np.float32)
 
         if i_target >= 0:
-            # 当前任务已确定时，补充候选智能体的到达、能力贡献和完工时间影响。
             arr_times = self._all_t_arr(i_target).astype(np.float32)
             req_i = inst['task_req'][i_target]
             caps = inst['robots_cap']
@@ -677,9 +614,7 @@ class ConstructionEnv:
 
         return feat
 
-    # ── 掩码计算 ─────────────────────────────────────────────────────────
     def _task_mask(self, active_ids: List[int]) -> np.ndarray:
-        """任务选择掩码：存在可行联盟则可选。"""
         inst = self.inst
         if not active_ids:
             return np.zeros(0, dtype=bool)
@@ -688,17 +623,15 @@ class ConstructionEnv:
         return np.all(reqs <= total_cap, axis=1)
 
     def _robot_satisfy_mask(self) -> np.ndarray:
-        """需求满足阶段机器人掩码：对当前缺口有正贡献。"""
         inst = self.inst
         i = self.current_task
         gap = np.maximum(
             0, inst['task_req'][i].astype(np.int64) - self.current_coalition_cap
-        )  # (D_CAP,)
+        )
         if gap.sum() == 0:
             return np.zeros(self.M, dtype=bool)
 
-        # 向量化：contrib[j] = sum_d min(cap_j[d], gap[d])
-        contrib = np.minimum(inst['robots_cap'], gap).sum(axis=1)  # (M,)
+        contrib = np.minimum(inst['robots_cap'], gap).sum(axis=1)
 
         in_coal = np.zeros(self.M, dtype=bool)
         for j in self.current_coalition:
@@ -706,25 +639,22 @@ class ConstructionEnv:
         return (contrib > 0) & ~in_coal
 
     def _robot_accel_mask(self) -> np.ndarray:
-        """加速阶段机器人掩码（不含停止动作，索引 M 始终有效）。"""
+        # An extra agent is eligible only if its completion gain exceeds its travel time.
         inst = self.inst
         i = self.current_task
         T_c = self.current_task_complete_time
 
         req_i = inst['task_req'][i]
-        caps = inst['robots_cap']  # (M, D_CAP)
+        caps = inst['robots_cap']
 
-        # 向量化：有贡献的机器人
-        contrib_mask = ((caps > 0) & (req_i > 0)).any(axis=1)  # (M,)
+        contrib_mask = ((caps > 0) & (req_i > 0)).any(axis=1)
 
         in_coal = np.zeros(self.M, dtype=bool)
         for j in self.current_coalition:
             in_coal[j] = True
 
-        # 向量化：计算全体到达时间
-        arr_times = self._all_t_arr(i)  # (M,)
+        arr_times = self._all_t_arr(i)
 
-        # 候选集：不在联盟、有贡献、到达时刻早于 T_c
         candidates = np.where(~in_coal & contrib_mask & (arr_times < T_c))[0]
 
         mask = np.zeros(self.M, dtype=bool)
@@ -739,16 +669,7 @@ class ConstructionEnv:
                 mask[j] = True
         return mask
 
-    # ── 统一接口 ─────────────────────────────────────────────────────────
     def get_mask_and_features(self):
-        """根据当前阶段返回掩码和特征。
-
-        返回值：
-          PHASE_TASK_SELECT  → (active_ids, task_feat, robot_feat, mask)
-          PHASE_ROBOT_SATISFY → (task_feat_cur, robot_feat, mask_robot)
-          PHASE_ROBOT_ACCEL   → (task_feat_cur, robot_feat, mask_robot_with_stop)
-              mask_robot_with_stop 长度 M+1，最后一位为停止动作（始终 True）
-        """
         if self.phase == PHASE_TASK_SELECT:
             active_ids = sorted(self.remaining_tasks)
             tf = self._task_features_all(active_ids)
@@ -756,7 +677,6 @@ class ConstructionEnv:
             mask = self._task_mask(active_ids)
             return active_ids, tf, rf, mask
 
-        # 机器人选择阶段（满足 or 加速）
         tf_cur = self._task_feature_current()
         rf = self._robot_features(self.current_task)
 
@@ -764,14 +684,11 @@ class ConstructionEnv:
             mask = self._robot_satisfy_mask()
             return tf_cur, rf, mask
 
-        # PHASE_ROBOT_ACCEL：掩码长度 M+1（最后位 = 停止动作）
         mask_base = self._robot_accel_mask()
-        mask_ext = np.append(mask_base, True)  # 停止动作始终可选
+        mask_ext = np.append(mask_base, True)
         return tf_cur, rf, mask_ext
 
-    # ── 动作执行 ─────────────────────────────────────────────────────────
     def step(self, action: int) -> bool:
-        """按当前阶段解释动作并推进构造环境。"""
         if self.phase == PHASE_TASK_SELECT:
             self._do_select_task(action)
         elif self.phase == PHASE_ROBOT_SATISFY:
@@ -781,7 +698,6 @@ class ConstructionEnv:
         return self.done
 
     def _do_select_task(self, task_id: int, task_ctx: Optional[np.ndarray] = None) -> None:
-        """记录当前任务，并初始化其待构造的联盟。"""
         self.current_task = task_id
         self.current_coalition = set()
         self.current_coalition_cap = np.zeros(D_CAP, dtype=np.int64)
@@ -802,7 +718,6 @@ class ConstructionEnv:
         self.phase = PHASE_ROBOT_SATISFY
 
     def _do_select_robot_satisfy(self, robot_id: int) -> None:
-        """把智能体加入联盟；能力满足后转入效率决策阶段。"""
         inst = self.inst
         i = self.current_task
         j = robot_id
@@ -819,15 +734,12 @@ class ConstructionEnv:
         self.coal_late_arr = max(self.coal_late_arr, t_arr_j)
         self.robot_task_seq[j].append(i)
 
-
-
         if coalition_satisfies(self.current_coalition, inst['robots_cap'], inst['task_req'][i]):
             self._recompute_current_times()
             self._exclude_nonparticipating_members(i)
             self.phase = PHASE_ROBOT_ACCEL
 
     def _do_select_robot_accel(self, action: int) -> None:
-        """选择额外智能体，或通过终止动作确定当前联盟。"""
         inst = self.inst
         i = self.current_task
         M = self.M
@@ -851,12 +763,10 @@ class ConstructionEnv:
         self._recompute_current_times()
         self._exclude_nonparticipating_members(i)
 
-
         if not self._robot_accel_mask().any():
             self._commit_task(i)
 
     def _exclude_nonparticipating_members(self, i: int) -> Set[int]:
-        """撤回任务完成后才会到达的智能体，保持实际联盟和路线记录一致。"""
         T_c = float(self.current_task_complete_time)
         excluded = {
             j for j in self.current_coalition
@@ -913,7 +823,6 @@ class ConstructionEnv:
         return excluded
 
     def _commit_task(self, i: int) -> None:
-        """确定任务联盟，并更新参与智能体的后续可用状态。"""
         inst = self.inst
         self._exclude_nonparticipating_members(i)
         coal = set(self.current_coalition)
@@ -945,7 +854,6 @@ class ConstructionEnv:
         self.remaining_tasks.discard(i)
         self.num_done += 1
 
-
         self.phase = PHASE_TASK_SELECT
         self.current_task = -1
         self.coal_late_arr = 0.0
@@ -954,7 +862,6 @@ class ConstructionEnv:
             self._finalize()
 
     def _finalize(self) -> None:
-        """完成全部任务后计入智能体返回站点的时间。"""
         if self.done:
             return
         inst = self.inst
@@ -967,8 +874,6 @@ class ConstructionEnv:
         self.makespan = float(self.t_free.max())
         self.done = True
 
-    # ── 辅助 ─────────────────────────────────────────────────────────────
     def get_progress_ratio(self) -> float:
-        """返回已确定联盟的任务数占当前已开放任务数的比例。"""
         n_unlocked = int(self.dynamic_unlocked.sum())
         return self.num_done / n_unlocked if n_unlocked > 0 else 0.0

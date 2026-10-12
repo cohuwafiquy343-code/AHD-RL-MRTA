@@ -1,9 +1,8 @@
-"""实例规模、策略网络维度与环境阶段的固定配置。"""
-
 import math
 
 D_CAP = 5
-# 组别编号 1–13 直接对应论文中的 G01–G13；元组依次为智能体数与任务数。
+
+# Group IDs follow the paper; each pair is (agents, tasks).
 GROUPS = {
     1: (5, 30),
     2: (10, 30),
@@ -19,7 +18,7 @@ GROUPS = {
     12: (15, 300),
     13: (20, 300),
 }
-# 每组机器人类型数与论文中的 n_S 一致。
+
 ROBOT_TYPES = {
     1: 2,
     2: 3,
@@ -40,7 +39,7 @@ NH = 8
 DFF = 256
 NLT = 2
 NLR = 2
-# 特征维度必须与 environment.py 实际构造的列数一致。
+
 DROP = 0.1
 CC = 10.0
 PHASE_TASK_SELECT = 0
